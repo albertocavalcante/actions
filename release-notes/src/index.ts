@@ -36,7 +36,7 @@ Handlebars.registerHelper("truncate", (str, len) => String(str).slice(0, len));
  */
 function detectPlatform(
   filename: string,
-  projectName: string,
+  _projectName: string,
 ): Platform | null {
   const basename = path.basename(filename);
 
@@ -196,7 +196,6 @@ function generateInstallCommands(
   projectName: string,
   repository: string,
 ): InstallCommand[] {
-  const cleanVersion = version.replace(/^v/, "");
   const isNightly = version === "nightly" || version.includes("nightly");
 
   const commands: InstallCommand[] = [

@@ -36575,7 +36575,7 @@ handlebars_1.default.registerHelper("truncate", (str, len) => String(str).slice(
 /**
  * Detect platform from filename
  */
-function detectPlatform(filename, projectName) {
+function detectPlatform(filename, _projectName) {
     const basename = path.basename(filename);
     // Check for binary patterns first (most specific first)
     for (const [id, platform] of Object.entries(types_1.PLATFORM_PATTERNS)) {
@@ -36715,7 +36715,6 @@ async function discoverAssets(assetsDir, projectName) {
  * Generate install commands for a version
  */
 function generateInstallCommands(version, projectName, repository) {
-    const cleanVersion = version.replace(/^v/, "");
     const isNightly = version === "nightly" || version.includes("nightly");
     const commands = [
         {

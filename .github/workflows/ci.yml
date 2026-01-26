@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    name: Lint & Typecheck
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: latest
+
+      - name: Install dprint
+        run: |
+          curl -fsSL https://dprint.dev/install.sh | sh
+          echo "$HOME/.dprint/bin" >> $GITHUB_PATH
+
+      - name: Check formatting (dprint)
+        run: ~/.dprint/bin/dprint check
+
+      - name: Install dependencies (release-notes)
+        working-directory: release-notes
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck (release-notes)
+        working-directory: release-notes
+        run: bun run typecheck
+
+      - name: Lint (release-notes)
+        working-directory: release-notes
+        run: bun run lint
+
+  build:
+    runs-on: ubuntu-24.04
+    name: Build
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies (release-notes)
+        working-directory: release-notes
+        run: bun install --frozen-lockfile
+
+      - name: Build (release-notes)
+        working-directory: release-notes
+        run: bun run build
+
+      - name: Check for uncommitted changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Error: Build produced uncommitted changes. Please rebuild and commit."
+            git status
+            git diff
+            exit 1
+          fi
