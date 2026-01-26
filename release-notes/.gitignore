@@ -1,3 +1,10 @@
 node_modules/
 *.log
 .DS_Store
+
+# Source maps contain absolute paths that differ between environments
+# Only dist/index.js and dist/licenses.txt are needed for the action to run
+dist/*.map
+dist/*.d.ts
+dist/*.d.ts.map
+dist/sourcemap-register.js

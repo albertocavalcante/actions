@@ -14,10 +14,14 @@ actions/
 ├── release-notes/          # Action: Generate beautiful release notes
 │   ├── action.yml          # Action definition
 │   ├── src/                # TypeScript source
-│   ├── dist/               # Compiled output (committed)
+│   ├── dist/               # Compiled output (committed, except *.map)
 │   └── package.json        # Dependencies
 ├── .github/
 │   └── workflows/ci.yml    # CI pipeline
+├── tools/
+│   └── lint/
+│       ├── ghalint.yaml    # GitHub Actions linter config
+│       └── pinact.yaml     # Action version pinning config
 ├── lefthook.yml            # Git hooks
 ├── dprint.json             # Formatting config
 └── AGENTS.md               # This file
@@ -51,7 +55,7 @@ GitHub Actions require the compiled `dist/` folder to be committed. After any so
 cd release-notes
 bun install
 bun run build
-# Commit the dist/ changes
+# Commit the dist/index.js changes (*.map files are gitignored)
 ```
 
 ### Conventional Commits
@@ -69,7 +73,50 @@ chore: update dependencies
 
 - **TypeScript**: ESLint + Prettier
 - **Markdown/JSON/YAML**: dprint
+- **GitHub Actions workflows**: ghalint + pinact
 - **Pre-commit hooks**: lefthook (install with `lefthook install`)
+
+## GitHub Actions Workflow Linting
+
+### ghalint
+
+Enforces best practices for GitHub Actions workflows:
+- Jobs must have explicit permissions
+- Jobs must have timeout
+- Secrets should be passed explicitly
+- `persist-credentials: false` on checkout
+
+```bash
+# Install
+brew install suzuki-shunsuke/tap/ghalint
+
+# Run
+ghalint run -c tools/lint/ghalint.yaml
+```
+
+### pinact
+
+Ensures all actions are pinned to full commit SHAs (not tags):
+
+```bash
+# Install
+brew install suzuki-shunsuke/tap/pinact
+
+# Check pins
+pinact run --verify -c tools/lint/pinact.yaml
+
+# Update pins to latest
+pinact run -u -c tools/lint/pinact.yaml
+```
+
+**Example of properly pinned action:**
+```yaml
+# Good - pinned to SHA with version comment
+- uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+# Bad - using tag only
+- uses: actions/checkout@v4
+```
 
 ## Adding a New Action
 
@@ -80,6 +127,7 @@ chore: update dependencies
    - `package.json` - Dependencies (use bun)
    - `tsconfig.json` - TypeScript config
    - `eslint.config.mjs` - ESLint config
+   - `.gitignore` - Exclude node_modules and *.map files
 3. Update `.github/workflows/ci.yml` to include the new action
 4. Update `.github/dependabot.yml` to track dependencies
 5. Build and commit: `bun run build`
@@ -115,6 +163,16 @@ bun run lint          # Check for issues
 bun run format        # Auto-fix formatting
 ```
 
+### Fix Workflow Lint Issues
+
+```bash
+# Check ghalint issues
+ghalint run -c tools/lint/ghalint.yaml
+
+# Update action pins
+pinact run -u -c tools/lint/pinact.yaml
+```
+
 ### Add New Platform Support (release-notes)
 
 Edit `src/types.ts` and add to `PLATFORM_PATTERNS`:
@@ -134,3 +192,7 @@ Edit `src/types.ts` and add to `PLATFORM_PATTERNS`:
 - [GitHub Actions Documentation](https://docs.github.com/en/actions/creating-actions)
 - [Bun Documentation](https://bun.sh/docs)
 - [TypeScript ESLint](https://typescript-eslint.io/)
+- [ghalint](https://github.com/suzuki-shunsuke/ghalint)
+- [pinact](https://github.com/suzuki-shunsuke/pinact)
+- [dprint](https://dprint.dev/)
+- [lefthook](https://github.com/evilmartians/lefthook)

@@ -4,7 +4,7 @@
   "description": "Generate beautiful release notes for multi-platform releases",
   "main": "dist/index.js",
   "scripts": {
-    "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
+    "build": "ncc build src/index.ts -o dist --license licenses.txt",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write src/**/*.ts",

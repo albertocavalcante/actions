@@ -23,6 +23,16 @@ pre-commit:
           fi
         done
 
+    workflow-lint:
+      glob: ".github/workflows/*.{yml,yaml}"
+      run: ghalint run -c tools/lint/ghalint.yaml
+      fail_text: "Fix GitHub Actions workflow issues (ghalint)"
+
+    workflow-pin:
+      glob: ".github/workflows/*.{yml,yaml}"
+      run: pinact run --verify -c tools/lint/pinact.yaml
+      fail_text: "Run 'pinact run -u -c tools/lint/pinact.yaml' to pin action versions"
+
 commit-msg:
   commands:
     conventional-commit:
