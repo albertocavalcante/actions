@@ -12,7 +12,7 @@ on:
         description: "Rust toolchain version"
         required: false
         type: string
-        default: "stable"
+        default: "1.90.0"
 
       working-directory:
         description: "Working directory for cargo commands"
