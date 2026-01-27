@@ -2,13 +2,9 @@
 
 Run [Google Copybara](https://github.com/google/copybara) to transform and sync code between repositories.
 
-## Features
+## Alternatives
 
-- **Direct JAR execution** - Faster than Docker-based alternatives
-- **Dual auth support** - GitHub App tokens (recommended) or SSH keys
-- **Automatic caching** - Copybara JAR is cached for faster runs
-- **Version control** - Pin to specific Copybara releases
-- **Full flag support** - init-history, last-rev, force, dry-run
+[olivr/copybara-action](https://github.com/olivr/copybara-action) is a great Docker-based alternative with more stability guarantees and additional features like auto-generated configs. Consider using it if you don't need GitHub App token authentication.
 
 ## Usage
 
@@ -31,7 +27,7 @@ Run [Google Copybara](https://github.com/google/copybara) to transform and sync 
     token: ${{ steps.app.outputs.token }}
 
 - name: Run Copybara
-  uses: albertocavalcante/actions/run-copybara@v1
+  uses: albertocavalcante/actions/run-copybara@main
   with:
     config-file: infra/copybara/copy.bara.sky
     workflow: push
@@ -43,7 +39,7 @@ Run [Google Copybara](https://github.com/google/copybara) to transform and sync 
 
 ```yaml
 - name: Run Copybara
-  uses: albertocavalcante/actions/run-copybara@v1
+  uses: albertocavalcante/actions/run-copybara@main
   with:
     config-file: infra/copybara/copy.bara.sky
     workflow: push
@@ -54,7 +50,7 @@ Run [Google Copybara](https://github.com/google/copybara) to transform and sync 
 
 ```yaml
 - name: Run Copybara
-  uses: albertocavalcante/actions/run-copybara@v1
+  uses: albertocavalcante/actions/run-copybara@main
   with:
     config-file: infra/copybara/copy.bara.sky
     workflow: push
@@ -66,7 +62,7 @@ Run [Google Copybara](https://github.com/google/copybara) to transform and sync 
 
 ```yaml
 - name: Run Copybara
-  uses: albertocavalcante/actions/run-copybara@v1
+  uses: albertocavalcante/actions/run-copybara@main
   with:
     config-file: infra/copybara/copy.bara.sky
     workflow: push
@@ -103,7 +99,7 @@ Run [Google Copybara](https://github.com/google/copybara) to transform and sync 
 
 ## Authentication
 
-### GitHub App Token (Recommended)
+### GitHub App Token
 
 Use [actions/create-github-app-token](https://github.com/actions/create-github-app-token) to generate a token:
 
@@ -114,31 +110,15 @@ Use [actions/create-github-app-token](https://github.com/actions/create-github-a
     private-key: ${{ secrets.APP_PRIVATE_KEY }}
 ```
 
-Benefits:
-- Fine-grained permissions
-- Works across organizations
-- Better audit trail
-- No personal account dependency
-
 ### SSH Deploy Key
 
 Add a deploy key to the destination repository with write access:
 
 ```yaml
-- uses: albertocavalcante/actions/run-copybara@v1
+- uses: albertocavalcante/actions/run-copybara@main
   with:
     ssh-key: ${{ secrets.DEPLOY_KEY }}
 ```
-
-## Comparison with Alternatives
-
-| Feature | This Action | olivr/copybara-action |
-|---------|-------------|----------------------|
-| Execution | Direct JAR | Docker container |
-| Startup | Fast (cached) | Slower (Docker pull) |
-| Auth | Token + SSH | SSH only |
-| Node version | 20 (current) | 12 (deprecated) |
-| Version control | Explicit | Docker tag |
 
 ## License
 

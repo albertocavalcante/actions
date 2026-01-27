@@ -2,7 +2,6 @@ name: Run Copybara
 description: |
   Run Google Copybara to transform and sync code between repositories.
   Supports both GitHub App tokens and SSH keys for authentication.
-  Uses direct JAR execution (faster than Docker-based alternatives).
 
 author: Alberto Cavalcante
 
