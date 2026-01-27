@@ -1,0 +1,182 @@
+name: Rust Build
+
+on:
+  workflow_call:
+    inputs:
+      binary-name:
+        description: "Name of the binary to build"
+        required: true
+        type: string
+
+      rust-version:
+        description: "Rust toolchain version"
+        required: false
+        type: string
+        default: "stable"
+
+      working-directory:
+        description: "Working directory for cargo commands"
+        required: false
+        type: string
+        default: "."
+
+      cargo-args:
+        description: "Additional arguments for cargo build"
+        required: false
+        type: string
+        default: ""
+
+      platforms:
+        description: |
+          Comma-separated list of platforms to build for.
+          Available: linux-amd64, linux-aarch64, linux-amd64-musl,
+                    darwin-arm64, darwin-amd64, windows-amd64
+        required: false
+        type: string
+        default: "linux-amd64,darwin-arm64"
+
+      artifact-retention-days:
+        description: "Number of days to retain artifacts"
+        required: false
+        type: number
+        default: 7
+
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 30
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Generate build matrix
+        id: matrix
+        shell: bash
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          # Define all available platforms
+          declare -A PLATFORM_CONFIG
+          PLATFORM_CONFIG["linux-amd64"]='{"os":"ubuntu-24.04","name":"linux-amd64","target":"x86_64-unknown-linux-gnu","cross":false}'
+          PLATFORM_CONFIG["linux-aarch64"]='{"os":"ubuntu-24.04","name":"linux-aarch64","target":"aarch64-unknown-linux-gnu","cross":true}'
+          PLATFORM_CONFIG["linux-amd64-musl"]='{"os":"ubuntu-24.04","name":"linux-amd64-musl","target":"x86_64-unknown-linux-musl","cross":false,"musl":true}'
+          PLATFORM_CONFIG["darwin-arm64"]='{"os":"macos-15","name":"darwin-arm64","target":"aarch64-apple-darwin","cross":false}'
+          PLATFORM_CONFIG["darwin-amd64"]='{"os":"macos-15","name":"darwin-amd64","target":"x86_64-apple-darwin","cross":true}'
+          PLATFORM_CONFIG["windows-amd64"]='{"os":"windows-2022","name":"windows-amd64","target":"x86_64-pc-windows-msvc","cross":false,"ext":".exe"}'
+          
+          # Build matrix from requested platforms
+          MATRIX="["
+          FIRST=true
+          IFS=',' read -ra PLATFORM_LIST <<< "$PLATFORMS"
+          for platform in "${PLATFORM_LIST[@]}"; do
+            platform=$(echo "$platform" | xargs)  # trim whitespace
+            if [[ -n "${PLATFORM_CONFIG[$platform]}" ]]; then
+              if [[ "$FIRST" != "true" ]]; then
+                MATRIX+=","
+              fi
+              MATRIX+="${PLATFORM_CONFIG[$platform]}"
+              FIRST=false
+            else
+              echo "::warning::Unknown platform: $platform"
+            fi
+          done
+          MATRIX+="]"
+          
+          echo "matrix={"include":$MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "Generated matrix: $MATRIX"
+
+  build:
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.name }})
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@56f84321dbccf38fb67ce29ab63e4754056677e0 # stable
+        with:
+          toolchain: ${{ inputs.rust-version }}
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.cross && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install musl tools
+        if: matrix.musl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Cache Cargo
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.target }}-
+            ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        working-directory: ${{ inputs.working-directory }}
+        run: cargo build --release --target ${{ matrix.target }} ${{ inputs.cargo-args }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Prepare artifact (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          BINARY_NAME: ${{ inputs.binary-name }}
+          TARGET: ${{ matrix.target }}
+          PLATFORM_NAME: ${{ matrix.name }}
+        run: |
+          mkdir -p dist
+          cp "${{ inputs.working-directory }}/target/${TARGET}/release/${BINARY_NAME}" dist/
+          cd dist
+          tar -czvf "${BINARY_NAME}-${PLATFORM_NAME}.tar.gz" "${BINARY_NAME}"
+          shasum -a 256 "${BINARY_NAME}-${PLATFORM_NAME}.tar.gz" > "${BINARY_NAME}-${PLATFORM_NAME}.tar.gz.sha256"
+          rm "${BINARY_NAME}"
+
+      - name: Prepare artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          BINARY_NAME: ${{ inputs.binary-name }}
+          TARGET: ${{ matrix.target }}
+          PLATFORM_NAME: ${{ matrix.name }}
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item "${{ inputs.working-directory }}/target/$env:TARGET/release/$env:BINARY_NAME.exe" -Destination "dist/"
+          Set-Location dist
+          Compress-Archive -Path "$env:BINARY_NAME.exe" -DestinationPath "$env:BINARY_NAME-$env:PLATFORM_NAME.zip"
+          $hash = (Get-FileHash -Algorithm SHA256 "$env:BINARY_NAME-$env:PLATFORM_NAME.zip").Hash.ToLower()
+          "$hash  $env:BINARY_NAME-$env:PLATFORM_NAME.zip" | Out-File -Encoding ASCII "$env:BINARY_NAME-$env:PLATFORM_NAME.zip.sha256"
+          Remove-Item "$env:BINARY_NAME.exe"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: binary-${{ matrix.name }}
+          path: dist/${{ inputs.binary-name }}-${{ matrix.name }}.*
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact-retention-days }}

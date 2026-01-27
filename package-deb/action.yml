@@ -1,0 +1,128 @@
+name: Package DEB
+description: |
+  Create a Debian package (.deb) from a binary artifact.
+  Handles control file generation and dpkg-deb packaging.
+
+author: Alberto Cavalcante
+
+branding:
+  icon: package
+  color: orange
+
+inputs:
+  binary-path:
+    description: "Path to the binary file to package"
+    required: true
+
+  binary-name:
+    description: "Name of the binary (used in package and install path)"
+    required: true
+
+  version:
+    description: "Package version (e.g., 1.0.0 or 0.0.0~nightly.20240101.abc123)"
+    required: true
+
+  arch:
+    description: "Package architecture (amd64, arm64)"
+    required: true
+
+  maintainer:
+    description: "Package maintainer (e.g., 'Name <email>')"
+    required: false
+    default: "GitHub Actions <actions@github.com>"
+
+  description:
+    description: "Short package description"
+    required: false
+    default: ""
+
+  homepage:
+    description: "Project homepage URL"
+    required: false
+    default: ""
+
+  control-template:
+    description: "Path to control file template (uses envsubst variables)"
+    required: false
+    default: ""
+
+  output-dir:
+    description: "Output directory for the .deb file"
+    required: false
+    default: "."
+
+outputs:
+  deb-file:
+    description: "Path to the generated .deb file"
+    value: ${{ steps.package.outputs.deb-file }}
+
+  deb-name:
+    description: "Name of the generated .deb file"
+    value: ${{ steps.package.outputs.deb-name }}
+
+  sha256:
+    description: "SHA256 checksum of the .deb file"
+    value: ${{ steps.package.outputs.sha256 }}
+
+runs:
+  using: composite
+  steps:
+    - name: Create package structure
+      shell: bash
+      run: |
+        mkdir -p pkg/DEBIAN pkg/usr/bin
+        cp "${{ inputs.binary-path }}" "pkg/usr/bin/${{ inputs.binary-name }}"
+        chmod 755 "pkg/usr/bin/${{ inputs.binary-name }}"
+
+    - name: Generate control file
+      shell: bash
+      env:
+        BINARY_NAME: ${{ inputs.binary-name }}
+        VERSION: ${{ inputs.version }}
+        ARCH: ${{ inputs.arch }}
+        MAINTAINER: ${{ inputs.maintainer }}
+        DESCRIPTION: ${{ inputs.description }}
+        HOMEPAGE: ${{ inputs.homepage }}
+        CONTROL_TEMPLATE: ${{ inputs.control-template }}
+      run: |
+        if [[ -n "$CONTROL_TEMPLATE" && -f "$CONTROL_TEMPLATE" ]]; then
+          envsubst < "$CONTROL_TEMPLATE" > pkg/DEBIAN/control
+        else
+          {
+            echo "Package: ${BINARY_NAME}"
+            echo "Version: ${VERSION}"
+            echo "Architecture: ${ARCH}"
+            echo "Maintainer: ${MAINTAINER}"
+            echo "Description: ${DESCRIPTION}"
+            if [[ -n "$HOMEPAGE" ]]; then
+              echo "Homepage: ${HOMEPAGE}"
+            fi
+          } > pkg/DEBIAN/control
+        fi
+
+    - name: Build DEB package
+      id: package
+      shell: bash
+      env:
+        BINARY_NAME: ${{ inputs.binary-name }}
+        VERSION: ${{ inputs.version }}
+        ARCH: ${{ inputs.arch }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+      run: |
+        DEB_NAME="${BINARY_NAME}_${VERSION}_${ARCH}.deb"
+        OUTPUT_PATH="${OUTPUT_DIR}/${DEB_NAME}"
+        
+        mkdir -p "$OUTPUT_DIR"
+        dpkg-deb --build pkg "$OUTPUT_PATH"
+        
+        SHA256=$(sha256sum "$OUTPUT_PATH" | awk '{print $1}')
+        echo "$SHA256  $DEB_NAME" > "${OUTPUT_PATH}.sha256"
+        
+        echo "deb-file=$OUTPUT_PATH" >> "$GITHUB_OUTPUT"
+        echo "deb-name=$DEB_NAME" >> "$GITHUB_OUTPUT"
+        echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+    - name: Cleanup
+      shell: bash
+      if: always()
+      run: rm -rf pkg

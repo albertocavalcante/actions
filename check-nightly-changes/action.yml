@@ -1,0 +1,90 @@
+name: Check Nightly Changes
+description: |
+  Check if there are new commits since the last nightly build.
+  Compares HEAD to the 'nightly' tag to determine if a build is needed.
+
+author: Alberto Cavalcante
+
+branding:
+  icon: git-commit
+  color: purple
+
+inputs:
+  tag-name:
+    description: "Tag name to compare against (default: nightly)"
+    required: false
+    default: "nightly"
+
+  force:
+    description: "Force build even if no changes detected"
+    required: false
+    default: "false"
+
+outputs:
+  should-build:
+    description: "Whether a build should be triggered (true/false)"
+    value: ${{ steps.check.outputs.should-build }}
+
+  short-sha:
+    description: "Short SHA of the current HEAD commit"
+    value: ${{ steps.check.outputs.short-sha }}
+
+  full-sha:
+    description: "Full SHA of the current HEAD commit"
+    value: ${{ steps.check.outputs.full-sha }}
+
+  commits-since:
+    description: "Number of commits since the last nightly (0 if tag doesn't exist)"
+    value: ${{ steps.check.outputs.commits-since }}
+
+  tag-exists:
+    description: "Whether the nightly tag exists (true/false)"
+    value: ${{ steps.check.outputs.tag-exists }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check for changes
+      id: check
+      shell: bash
+      env:
+        TAG_NAME: ${{ inputs.tag-name }}
+        FORCE: ${{ inputs.force }}
+      run: |
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        FULL_SHA=$(git rev-parse HEAD)
+        
+        echo "short-sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+        echo "full-sha=$FULL_SHA" >> "$GITHUB_OUTPUT"
+        
+        # Force build if requested
+        if [[ "$FORCE" == "true" ]]; then
+          echo "should-build=true" >> "$GITHUB_OUTPUT"
+          echo "commits-since=0" >> "$GITHUB_OUTPUT"
+          echo "tag-exists=unknown" >> "$GITHUB_OUTPUT"
+          echo "::notice::Force build requested"
+          exit 0
+        fi
+        
+        # Check if tag exists
+        if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+          echo "tag-exists=true" >> "$GITHUB_OUTPUT"
+          TAG_SHA=$(git rev-parse "$TAG_NAME")
+          HEAD_SHA=$(git rev-parse HEAD)
+          
+          if [[ "$TAG_SHA" == "$HEAD_SHA" ]]; then
+            echo "should-build=false" >> "$GITHUB_OUTPUT"
+            echo "commits-since=0" >> "$GITHUB_OUTPUT"
+            echo "::notice::No changes since last $TAG_NAME build"
+          else
+            COMMITS=$(git rev-list --count "${TAG_NAME}..HEAD")
+            echo "should-build=true" >> "$GITHUB_OUTPUT"
+            echo "commits-since=$COMMITS" >> "$GITHUB_OUTPUT"
+            echo "::notice::$COMMITS commits since last $TAG_NAME build"
+          fi
+        else
+          echo "tag-exists=false" >> "$GITHUB_OUTPUT"
+          echo "should-build=true" >> "$GITHUB_OUTPUT"
+          echo "commits-since=0" >> "$GITHUB_OUTPUT"
+          echo "::notice::No previous $TAG_NAME tag found, building"
+        fi

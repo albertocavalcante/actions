@@ -1,0 +1,171 @@
+name: Package RPM
+description: |
+  Create an RPM package from a binary artifact.
+  Handles spec file generation and rpmbuild packaging.
+
+author: Alberto Cavalcante
+
+branding:
+  icon: package
+  color: red
+
+inputs:
+  binary-path:
+    description: "Path to the binary file to package"
+    required: true
+
+  binary-name:
+    description: "Name of the binary (used in package and install path)"
+    required: true
+
+  version:
+    description: "Package version (e.g., 1.0.0)"
+    required: true
+
+  release:
+    description: "Package release number (e.g., 1 or 0.nightly.20240101.abc123)"
+    required: false
+    default: "1"
+
+  arch:
+    description: "Package architecture (x86_64, aarch64)"
+    required: true
+
+  summary:
+    description: "Short package summary"
+    required: false
+    default: ""
+
+  description:
+    description: "Full package description"
+    required: false
+    default: ""
+
+  license:
+    description: "Package license"
+    required: false
+    default: "MIT"
+
+  url:
+    description: "Project URL"
+    required: false
+    default: ""
+
+  spec-template:
+    description: "Path to spec file template (uses envsubst variables)"
+    required: false
+    default: ""
+
+  output-dir:
+    description: "Output directory for the .rpm file"
+    required: false
+    default: "."
+
+outputs:
+  rpm-file:
+    description: "Path to the generated .rpm file"
+    value: ${{ steps.package.outputs.rpm-file }}
+
+  rpm-name:
+    description: "Name of the generated .rpm file"
+    value: ${{ steps.package.outputs.rpm-name }}
+
+  sha256:
+    description: "SHA256 checksum of the .rpm file"
+    value: ${{ steps.package.outputs.sha256 }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install RPM tools
+      shell: bash
+      run: |
+        if ! command -v rpmbuild &> /dev/null; then
+          if command -v apt-get &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y rpm
+          elif command -v dnf &> /dev/null; then
+            sudo dnf install -y rpm-build
+          elif command -v yum &> /dev/null; then
+            sudo yum install -y rpm-build
+          fi
+        fi
+
+    - name: Create rpmbuild structure
+      shell: bash
+      run: |
+        mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+        cp "${{ inputs.binary-path }}" rpmbuild/SOURCES/
+
+    - name: Generate spec file
+      shell: bash
+      env:
+        BINARY_NAME: ${{ inputs.binary-name }}
+        VERSION: ${{ inputs.version }}
+        RELEASE: ${{ inputs.release }}
+        ARCH: ${{ inputs.arch }}
+        SUMMARY: ${{ inputs.summary }}
+        DESCRIPTION: ${{ inputs.description }}
+        LICENSE: ${{ inputs.license }}
+        URL: ${{ inputs.url }}
+        SPEC_TEMPLATE: ${{ inputs.spec-template }}
+      run: |
+        if [[ -n "$SPEC_TEMPLATE" && -f "$SPEC_TEMPLATE" ]]; then
+          envsubst < "$SPEC_TEMPLATE" > rpmbuild/SPECS/${BINARY_NAME}.spec
+        else
+          cat > rpmbuild/SPECS/${BINARY_NAME}.spec << SPEC
+        # Disable stripping - binary may be cross-compiled
+        %define __strip /bin/true
+        %define debug_package %{nil}
+
+        Name:           ${BINARY_NAME}
+        Version:        ${VERSION}
+        Release:        ${RELEASE}
+        Summary:        ${SUMMARY}
+        License:        ${LICENSE}
+        URL:            ${URL}
+
+        %description
+        ${DESCRIPTION}
+
+        %install
+        mkdir -p %{buildroot}/usr/bin
+        cp %{_sourcedir}/${BINARY_NAME} %{buildroot}/usr/bin/
+        chmod 755 %{buildroot}/usr/bin/${BINARY_NAME}
+
+        %files
+        /usr/bin/${BINARY_NAME}
+        SPEC
+        fi
+
+    - name: Build RPM package
+      id: package
+      shell: bash
+      env:
+        BINARY_NAME: ${{ inputs.binary-name }}
+        VERSION: ${{ inputs.version }}
+        RELEASE: ${{ inputs.release }}
+        ARCH: ${{ inputs.arch }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+      run: |
+        rpmbuild --define "_topdir $(pwd)/rpmbuild" \
+                 --define "_arch ${ARCH}" \
+                 --target "${ARCH}" \
+                 -bb "rpmbuild/SPECS/${BINARY_NAME}.spec"
+        
+        mkdir -p "$OUTPUT_DIR"
+        RPM_FILE=$(find rpmbuild/RPMS -name "*.rpm" -type f | head -1)
+        RPM_NAME=$(basename "$RPM_FILE")
+        
+        cp "$RPM_FILE" "${OUTPUT_DIR}/"
+        
+        SHA256=$(sha256sum "${OUTPUT_DIR}/${RPM_NAME}" | awk '{print $1}')
+        echo "$SHA256  $RPM_NAME" > "${OUTPUT_DIR}/${RPM_NAME}.sha256"
+        
+        echo "rpm-file=${OUTPUT_DIR}/${RPM_NAME}" >> "$GITHUB_OUTPUT"
+        echo "rpm-name=$RPM_NAME" >> "$GITHUB_OUTPUT"
+        echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+    - name: Cleanup
+      shell: bash
+      if: always()
+      run: rm -rf rpmbuild

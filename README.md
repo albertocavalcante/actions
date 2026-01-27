@@ -45,6 +45,63 @@ Automatically update a Homebrew formula in a tap repository.
       }
 ```
 
+### [package-deb](./package-deb)
+
+Create Debian packages (.deb) from binary artifacts.
+
+```yaml
+- name: Package DEB
+  id: deb
+  uses: albertocavalcante/actions/package-deb@main
+  with:
+    binary-path: extracted/myapp
+    binary-name: myapp
+    version: 1.0.0
+    arch: amd64
+    maintainer: "Your Name <email@example.com>"
+    description: "My awesome CLI tool"
+    homepage: https://github.com/owner/myapp
+
+# Outputs: deb-file, deb-name, sha256
+```
+
+### [package-rpm](./package-rpm)
+
+Create RPM packages from binary artifacts.
+
+```yaml
+- name: Package RPM
+  id: rpm
+  uses: albertocavalcante/actions/package-rpm@main
+  with:
+    binary-path: extracted/myapp
+    binary-name: myapp
+    version: 1.0.0
+    release: 1
+    arch: x86_64
+    summary: "My awesome CLI tool"
+    description: "A tool for doing things"
+    license: MIT
+    url: https://github.com/owner/myapp
+
+# Outputs: rpm-file, rpm-name, sha256
+```
+
+### [check-nightly-changes](./check-nightly-changes)
+
+Check if there are new commits since the last nightly build.
+
+```yaml
+- name: Check for changes
+  id: check
+  uses: albertocavalcante/actions/check-nightly-changes@main
+  with:
+    tag-name: nightly  # optional, defaults to 'nightly'
+    force: ${{ github.event.inputs.force }}
+
+# Outputs: should-build, short-sha, full-sha, commits-since, tag-exists
+```
+
 ### [compute-checksums](./compute-checksums)
 
 Compute SHA256 checksums for local files or remote URLs.
@@ -75,6 +132,38 @@ Run Google Copybara to transform and sync code between repositories.
     git-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+## Reusable Workflows
+
+### rust-build
+
+Reusable workflow for building Rust binaries across multiple platforms.
+
+```yaml
+jobs:
+  build:
+    uses: albertocavalcante/actions/.github/workflows/rust-build.yml@main
+    with:
+      binary-name: myapp
+      rust-version: "1.87.0"
+      platforms: "linux-amd64,linux-aarch64,darwin-arm64,darwin-amd64,windows-amd64"
+      # Optional:
+      # working-directory: "."
+      # cargo-args: "--features foo"
+      # artifact-retention-days: 7
+      # timeout-minutes: 30
+
+# Produces artifacts: binary-linux-amd64, binary-linux-aarch64, etc.
+# Each contains: myapp-{platform}.tar.gz and myapp-{platform}.tar.gz.sha256
+```
+
+**Supported platforms:**
+- `linux-amd64` - x86_64-unknown-linux-gnu
+- `linux-aarch64` - aarch64-unknown-linux-gnu (cross-compiled)
+- `linux-amd64-musl` - x86_64-unknown-linux-musl (static binary)
+- `darwin-arm64` - aarch64-apple-darwin
+- `darwin-amd64` - x86_64-apple-darwin (cross-compiled)
+- `windows-amd64` - x86_64-pc-windows-msvc
+
 ## Complete Release Workflow Example
 
 Combine the actions for a complete release automation pipeline:
@@ -88,30 +177,41 @@ on:
 
 jobs:
   build:
+    uses: albertocavalcante/actions/.github/workflows/rust-build.yml@main
+    with:
+      binary-name: myapp
+      rust-version: "1.87.0"
+      platforms: "linux-amd64,linux-aarch64,darwin-arm64,darwin-amd64,windows-amd64"
+
+  package-deb:
+    needs: build
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            platform: linux-x64
-          - os: macos-latest
-            platform: darwin-arm64
-    runs-on: ${{ matrix.os }}
+          - artifact: linux-amd64
+            arch: amd64
+          - artifact: linux-aarch64
+            arch: arm64
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: |
-          # Build your binary
-          mkdir -p dist
-          # ... build commands ...
-          tar -czf dist/myapp-${{ matrix.platform }}.tar.gz myapp
-          shasum -a 256 dist/myapp-${{ matrix.platform }}.tar.gz > dist/myapp-${{ matrix.platform }}.tar.gz.sha256
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.artifact }}
+          path: artifacts
+      - run: tar -xzf artifacts/*.tar.gz -C artifacts
+      - uses: albertocavalcante/actions/package-deb@main
+        with:
+          binary-path: artifacts/myapp
+          binary-name: myapp
+          version: ${{ github.ref_name }}
+          arch: ${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.platform }}
-          path: dist/*
+          name: deb-${{ matrix.arch }}
+          path: "*.deb*"
 
   release:
-    needs: build
+    needs: [build, package-deb]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -142,6 +242,52 @@ jobs:
           version: ${{ github.ref_name }}
           github-token: ${{ secrets.TAP_TOKEN }}
           assets: ${{ steps.notes.outputs.homebrew-assets }}
+```
+
+## Nightly Workflow Example
+
+```yaml
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Force build"
+        type: boolean
+        default: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should-build: ${{ steps.check.outputs.should-build }}
+      short-sha: ${{ steps.check.outputs.short-sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: albertocavalcante/actions/check-nightly-changes@main
+        id: check
+        with:
+          force: ${{ inputs.force }}
+
+  build:
+    needs: check
+    if: needs.check.outputs.should-build == 'true'
+    uses: albertocavalcante/actions/.github/workflows/rust-build.yml@main
+    with:
+      binary-name: myapp
+      platforms: "linux-amd64,darwin-arm64"
+      artifact-retention-days: 3
+
+  release:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      # ... create nightly release
 ```
 
 ## Using with GitHub App (Eukia)
