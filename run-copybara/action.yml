@@ -1,0 +1,205 @@
+name: Run Copybara
+description: |
+  Run Google Copybara to transform and sync code between repositories.
+  Supports both GitHub App tokens and SSH keys for authentication.
+  Uses direct JAR execution (faster than Docker-based alternatives).
+
+author: Alberto Cavalcante
+
+inputs:
+  version:
+    description: Copybara release version
+    required: false
+    default: "20251215"
+
+  config-file:
+    description: Path to copy.bara.sky configuration file
+    required: true
+
+  workflow:
+    description: Workflow name defined in the config file (e.g., push, pull, validate)
+    required: true
+
+  destination-url:
+    description: Git destination URL (overrides config if provided)
+    required: false
+    default: ""
+
+  init-history:
+    description: Initialize history (first-time sync, migrates all commits)
+    required: false
+    default: "false"
+
+  last-rev:
+    description: Last revision SHA (override starting point)
+    required: false
+    default: ""
+
+  force:
+    description: Force push (dangerous - may overwrite destination changes)
+    required: false
+    default: "false"
+
+  dry-run:
+    description: Validate configuration without pushing (uses 'validate' command)
+    required: false
+    default: "false"
+
+  git-token:
+    description: GitHub token for HTTPS authentication (GitHub App token or PAT)
+    required: false
+    default: ""
+
+  ssh-key:
+    description: SSH private key for authentication (alternative to git-token)
+    required: false
+    default: ""
+
+  git-user-name:
+    description: Git user name for commits
+    required: false
+    default: "github-actions[bot]"
+
+  git-user-email:
+    description: Git user email for commits
+    required: false
+    default: "github-actions[bot]@users.noreply.github.com"
+
+  java-version:
+    description: Java version to use
+    required: false
+    default: "21"
+
+  extra-args:
+    description: Additional arguments to pass to Copybara
+    required: false
+    default: ""
+
+outputs:
+  copybara-jar:
+    description: Path to the Copybara JAR file
+    value: ${{ steps.setup.outputs.jar-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [[ -z "${{ inputs.git-token }}" && -z "${{ inputs.ssh-key }}" ]]; then
+          echo "::error::Either git-token or ssh-key must be provided"
+          exit 1
+        fi
+
+    - name: Set up Java
+      uses: actions/setup-java@7a6d8a8234af8eb26422e24e3006232cccaa061b # v4.6.0
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+
+    - name: Cache Copybara JAR
+      id: cache
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: /tmp/copybara_deploy.jar
+        key: copybara-${{ inputs.version }}
+
+    - name: Download Copybara
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "::group::Downloading Copybara v${{ inputs.version }}"
+        curl -fsSL -o /tmp/copybara_deploy.jar \
+          "https://github.com/google/copybara/releases/download/v${{ inputs.version }}/copybara_deploy.jar"
+        echo "::endgroup::"
+
+    - name: Set up outputs
+      id: setup
+      shell: bash
+      run: echo "jar-path=/tmp/copybara_deploy.jar" >> "$GITHUB_OUTPUT"
+
+    - name: Configure Git (token auth)
+      if: inputs.git-token != ''
+      shell: bash
+      run: |
+        git config --global user.name "${{ inputs.git-user-name }}"
+        git config --global user.email "${{ inputs.git-user-email }}"
+        git config --global credential.helper store
+        echo "https://x-access-token:${{ inputs.git-token }}@github.com" > ~/.git-credentials
+
+    - name: Configure Git (SSH auth)
+      if: inputs.ssh-key != ''
+      shell: bash
+      run: |
+        git config --global user.name "${{ inputs.git-user-name }}"
+        git config --global user.email "${{ inputs.git-user-email }}"
+        mkdir -p ~/.ssh
+        echo "${{ inputs.ssh-key }}" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+
+    - name: Build Copybara arguments
+      id: args
+      shell: bash
+      run: |
+        ARGS=""
+
+        # Destination URL override
+        if [[ -n "${{ inputs.destination-url }}" ]]; then
+          ARGS="$ARGS --git-destination-url=${{ inputs.destination-url }}"
+        fi
+
+        # Flags
+        if [[ "${{ inputs.init-history }}" == "true" ]]; then
+          ARGS="$ARGS --init-history"
+        fi
+
+        if [[ -n "${{ inputs.last-rev }}" ]]; then
+          ARGS="$ARGS --last-rev ${{ inputs.last-rev }}"
+        fi
+
+        if [[ "${{ inputs.force }}" == "true" ]]; then
+          ARGS="$ARGS --force"
+        fi
+
+        # Always ignore noop for migrate
+        if [[ "${{ inputs.dry-run }}" != "true" ]]; then
+          ARGS="$ARGS --ignore-noop"
+        fi
+
+        # Extra args
+        if [[ -n "${{ inputs.extra-args }}" ]]; then
+          ARGS="$ARGS ${{ inputs.extra-args }}"
+        fi
+
+        echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+
+    - name: Run Copybara (validate)
+      if: inputs.dry-run == 'true'
+      shell: bash
+      run: |
+        echo "::group::Running Copybara validate"
+        java -jar /tmp/copybara_deploy.jar validate \
+          "${{ inputs.config-file }}" \
+          "${{ inputs.workflow }}"
+        echo "::endgroup::"
+
+    - name: Run Copybara (migrate)
+      if: inputs.dry-run != 'true'
+      shell: bash
+      run: |
+        echo "::group::Running Copybara migrate"
+        java -jar /tmp/copybara_deploy.jar migrate \
+          "${{ inputs.config-file }}" \
+          "${{ inputs.workflow }}" \
+          ${{ steps.args.outputs.args }}
+        echo "::endgroup::"
+
+    - name: Cleanup SSH key
+      if: always() && inputs.ssh-key != ''
+      shell: bash
+      run: rm -f ~/.ssh/id_ed25519
+
+branding:
+  icon: copy
+  color: blue
