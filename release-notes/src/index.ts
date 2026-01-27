@@ -457,7 +457,51 @@ async function run(): Promise<void> {
     core.setOutput("release-notes", releaseNotes);
     core.setOutput("release-notes-file", outputPath);
 
+    // Generate assets-json: full metadata for all assets
+    const allAssets = [...context.binaries, ...context.debPackages, ...context.rpmPackages];
+    const assetsJson = allAssets.map((asset) => ({
+      filename: asset.filename,
+      platform: asset.platform.id,
+      os: asset.platform.os,
+      arch: asset.platform.arch,
+      type: asset.type,
+      extension: asset.extension,
+      size: asset.size,
+      sha256: asset.sha256,
+      url: `https://github.com/${repository}/releases/download/${version}/${asset.filename}`,
+    }));
+    core.setOutput("assets-json", JSON.stringify(assetsJson));
+
+    // Generate checksums-json: simple filename -> sha256 mapping
+    const checksumsJson: Record<string, string> = {};
+    for (const asset of allAssets) {
+      if (asset.sha256) {
+        checksumsJson[asset.filename] = asset.sha256;
+      }
+    }
+    core.setOutput("checksums-json", JSON.stringify(checksumsJson));
+
+    // Generate homebrew-assets: formatted for update-homebrew-tap action
+    const homebrewAssets: Record<string, { url: string; sha256?: string }> = {};
+    for (const asset of context.binaries) {
+      // Map platform.id to homebrew platform format
+      const platformMap: Record<string, string> = {
+        "darwin-arm64": "darwin-arm64",
+        "darwin-amd64": "darwin-x64",
+        "linux-aarch64": "linux-arm64",
+        "linux-amd64": "linux-x64",
+        "linux-amd64-musl": "linux-x64-musl",
+      };
+      const homebrewPlatform = platformMap[asset.platform.id] || asset.platform.id;
+      homebrewAssets[homebrewPlatform] = {
+        url: `https://github.com/${repository}/releases/download/${version}/${asset.filename}`,
+        sha256: asset.sha256,
+      };
+    }
+    core.setOutput("homebrew-assets", JSON.stringify(homebrewAssets));
+
     core.info(`Release notes generated successfully: ${outputPath}`);
+    core.info(`Discovered ${allAssets.length} assets, ${Object.keys(checksumsJson).length} with checksums`);
   } catch (error) {
     if (error instanceof Error) {
       core.setFailed(error.message);

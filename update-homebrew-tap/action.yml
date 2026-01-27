@@ -1,0 +1,117 @@
+name: Update Homebrew Tap
+description: |
+  Automatically update a Homebrew formula in a tap repository.
+  Supports multi-platform binaries with automatic SHA256 fetching.
+
+author: Alberto Cavalcante
+
+branding:
+  icon: package
+  color: orange
+
+inputs:
+  tap-repo:
+    description: "Target Homebrew tap repository (e.g., owner/homebrew-tap)"
+    required: true
+
+  formula-name:
+    description: "Formula name (e.g., copybara)"
+    required: true
+
+  version:
+    description: "Release version (e.g., v1.0.0 or 1.0.0)"
+    required: true
+
+  template:
+    description: "Path to formula template file (.rb.in) with Handlebars placeholders"
+    required: false
+
+  template-inline:
+    description: "Inline formula template (alternative to template file)"
+    required: false
+
+  assets:
+    description: |
+      JSON object mapping platform identifiers to asset info.
+      Format: {"darwin-arm64": {"url": "...", "sha256": "..."}, ...}
+      If sha256 is omitted, will attempt to fetch from url.sha256
+    required: true
+
+  download-url-pattern:
+    description: |
+      URL pattern for downloads. Use {version}, {platform}, {filename} placeholders.
+      Example: https://github.com/owner/repo/releases/download/{version}/{filename}
+    required: false
+
+  github-token:
+    description: "GitHub token with write access to the tap repository"
+    required: true
+
+  commit-message:
+    description: "Custom commit message (default: 'Update {formula} to {version}')"
+    required: false
+
+  branch:
+    description: "Target branch in tap repository (default: main)"
+    required: false
+    default: "main"
+
+  formula-path:
+    description: "Path to formula in tap repo (default: Formula/{name}.rb)"
+    required: false
+
+  dry-run:
+    description: "Generate formula without committing"
+    required: false
+    default: "false"
+
+  # Formula metadata (used with default template)
+  description:
+    description: "Formula description"
+    required: false
+
+  homepage:
+    description: "Project homepage URL"
+    required: false
+
+  license:
+    description: "License identifier (e.g., MIT, Apache-2.0)"
+    required: false
+
+  binary-name:
+    description: "Binary name if different from formula name"
+    required: false
+
+  # Private repo support
+  private-repo:
+    description: "Set to true if downloading from a private GitHub repository (requires HOMEBREW_GITHUB_API_TOKEN)"
+    required: false
+    default: "false"
+
+  # Git committer configuration
+  git-user-name:
+    description: "Git user name for commits"
+    required: false
+    default: "github-actions[bot]"
+
+  git-user-email:
+    description: "Git user email for commits"
+    required: false
+    default: "41898282+github-actions[bot]@users.noreply.github.com"
+
+outputs:
+  formula-content:
+    description: "Generated formula content"
+
+  formula-path:
+    description: "Path to formula in tap repository"
+
+  commit-sha:
+    description: "SHA of the commit (if not dry-run)"
+
+  commit-url:
+    description: "URL to the commit (if not dry-run)"
+
+runs:
+  using: node20
+  main: dist/index.js

@@ -1,0 +1,55 @@
+name: Compute Checksums
+description: |
+  Compute SHA256 checksums for local files or remote URLs.
+  Outputs structured JSON for use by other actions.
+
+author: Alberto Cavalcante
+
+branding:
+  icon: hash
+  color: green
+
+inputs:
+  files:
+    description: |
+      Glob pattern(s) for local files to checksum.
+      Multiple patterns separated by newlines.
+      Example: "dist/*.tar.gz"
+    required: false
+
+  urls:
+    description: |
+      JSON array of URLs to download and checksum.
+      Example: ["https://example.com/file1.tar.gz", "https://example.com/file2.tar.gz"]
+    required: false
+
+  url-map:
+    description: |
+      JSON object mapping identifiers to URLs.
+      Example: {"darwin-arm64": "https://example.com/app-darwin-arm64.tar.gz"}
+      Output will use identifiers as keys.
+    required: false
+
+  read-sha256-files:
+    description: "Also read existing .sha256 files alongside assets"
+    required: false
+    default: "true"
+
+  algorithm:
+    description: "Hash algorithm (sha256, sha512, md5)"
+    required: false
+    default: "sha256"
+
+outputs:
+  checksums:
+    description: "JSON object mapping filename/identifier to checksum"
+
+  checksums-file:
+    description: "Path to checksums JSON file"
+
+  checksums-list:
+    description: "Newline-separated list in 'checksum  filename' format"
+
+runs:
+  using: node20
+  main: dist/index.js

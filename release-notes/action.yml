@@ -46,6 +46,12 @@ outputs:
     description: "Generated release notes markdown"
   release-notes-file:
     description: "Path to generated release notes file"
+  assets-json:
+    description: "JSON object with all discovered assets and their metadata (platform, sha256, size, url)"
+  checksums-json:
+    description: "JSON object mapping filenames to SHA256 checksums"
+  homebrew-assets:
+    description: "JSON object formatted for update-homebrew-tap action consumption"
 
 runs:
   using: "node20"
