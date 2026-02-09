@@ -1,0 +1,214 @@
+name: Go Build
+
+on:
+  workflow_call:
+    inputs:
+      binary-name:
+        description: "Name of the output binary"
+        required: true
+        type: string
+
+      go-version:
+        description: "Go version to use"
+        required: false
+        type: string
+        default: "1.25"
+
+      module-path:
+        description: "Path to main package (defaults to ./cmd/{binary-name})"
+        required: false
+        type: string
+        default: ""
+
+      build-tags:
+        description: "Go build tags (e.g. 'lspls_full')"
+        required: false
+        type: string
+        default: ""
+
+      ldflags:
+        description: "Extra ldflags appended after auto-injected version/commit/date"
+        required: false
+        type: string
+        default: ""
+
+      platforms:
+        description: |
+          Comma-separated list of platforms to build for.
+          Available: linux-amd64, linux-arm64, darwin-amd64,
+                    darwin-arm64, windows-amd64
+        required: false
+        type: string
+        default: "linux-amd64,darwin-arm64"
+
+      artifact-prefix:
+        description: "Prefix for uploaded artifact names"
+        required: false
+        type: string
+        default: "binary"
+
+      artifact-retention-days:
+        description: "Number of days to retain artifacts"
+        required: false
+        type: number
+        default: 7
+
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 15
+
+jobs:
+  setup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Generate build matrix
+        id: matrix
+        shell: bash
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          # Define all available platforms (all build on ubuntu — Go cross-compiles natively)
+          declare -A PLATFORM_CONFIG
+          PLATFORM_CONFIG["linux-amd64"]='{"name":"linux-amd64","goos":"linux","goarch":"amd64","ext":""}'
+          PLATFORM_CONFIG["linux-arm64"]='{"name":"linux-arm64","goos":"linux","goarch":"arm64","ext":""}'
+          PLATFORM_CONFIG["darwin-amd64"]='{"name":"darwin-amd64","goos":"darwin","goarch":"amd64","ext":""}'
+          PLATFORM_CONFIG["darwin-arm64"]='{"name":"darwin-arm64","goos":"darwin","goarch":"arm64","ext":""}'
+          PLATFORM_CONFIG["windows-amd64"]='{"name":"windows-amd64","goos":"windows","goarch":"amd64","ext":".exe"}'
+
+          # Build matrix from requested platforms
+          MATRIX="["
+          FIRST=true
+          IFS=',' read -ra PLATFORM_LIST <<< "$PLATFORMS"
+          for platform in "${PLATFORM_LIST[@]}"; do
+            platform=$(echo "$platform" | xargs)  # trim whitespace
+            if [[ -n "${PLATFORM_CONFIG[$platform]}" ]]; then
+              if [[ "$FIRST" != "true" ]]; then
+                MATRIX+=","
+              fi
+              MATRIX+="${PLATFORM_CONFIG[$platform]}"
+              FIRST=false
+            else
+              echo "::warning::Unknown platform: $platform"
+            fi
+          done
+          MATRIX+="]"
+
+          echo "matrix={\"include\":$MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "Generated matrix: $MATRIX"
+
+  build:
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+
+    runs-on: ubuntu-24.04
+    name: Build (${{ matrix.name }})
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: ${{ inputs.go-version }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Compute version metadata
+        id: meta
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          COMMIT="${GITHUB_SHA:0:12}"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION  Commit: $COMMIT  Date: $DATE"
+
+      - name: Build binary
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          BINARY_NAME: ${{ inputs.binary-name }}
+          EXT: ${{ matrix.ext }}
+          MODULE_PATH: ${{ inputs.module-path }}
+          BUILD_TAGS: ${{ inputs.build-tags }}
+          EXTRA_LDFLAGS: ${{ inputs.ldflags }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          COMMIT: ${{ steps.meta.outputs.commit }}
+          DATE: ${{ steps.meta.outputs.date }}
+        run: |
+          # Derive module path if not provided
+          if [[ -z "$MODULE_PATH" ]]; then
+            MODULE_PATH="./cmd/${BINARY_NAME}"
+          fi
+
+          # Build ldflags
+          LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
+          if [[ -n "$EXTRA_LDFLAGS" ]]; then
+            LDFLAGS="${LDFLAGS} ${EXTRA_LDFLAGS}"
+          fi
+
+          # Build tags
+          TAGS_FLAG=""
+          if [[ -n "$BUILD_TAGS" ]]; then
+            TAGS_FLAG="-tags=${BUILD_TAGS}"
+          fi
+
+          echo "Building ${BINARY_NAME}${EXT} for ${GOOS}/${GOARCH}"
+          echo "  module:  ${MODULE_PATH}"
+          echo "  ldflags: ${LDFLAGS}"
+          echo "  tags:    ${BUILD_TAGS:-<none>}"
+
+          go build -trimpath -ldflags="${LDFLAGS}" ${TAGS_FLAG} -o "${BINARY_NAME}${EXT}" "${MODULE_PATH}"
+
+      - name: Package artifact
+        shell: bash
+        env:
+          BINARY_NAME: ${{ inputs.binary-name }}
+          PLATFORM_NAME: ${{ matrix.name }}
+          EXT: ${{ matrix.ext }}
+          GOOS: ${{ matrix.goos }}
+        run: |
+          mkdir -p dist
+
+          if [[ "$GOOS" == "windows" ]]; then
+            # ZIP for Windows
+            ARCHIVE="${BINARY_NAME}-${PLATFORM_NAME}.zip"
+            zip "${ARCHIVE}" "${BINARY_NAME}${EXT}"
+          else
+            # tar.gz for Unix
+            ARCHIVE="${BINARY_NAME}-${PLATFORM_NAME}.tar.gz"
+            tar -czvf "${ARCHIVE}" "${BINARY_NAME}${EXT}"
+          fi
+
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          mv "${ARCHIVE}" "${ARCHIVE}.sha256" dist/
+
+          echo "Packaged: ${ARCHIVE}"
+          cat "dist/${ARCHIVE}.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.artifact-prefix }}-${{ matrix.name }}
+          path: dist/${{ inputs.binary-name }}-${{ matrix.name }}.*
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact-retention-days }}

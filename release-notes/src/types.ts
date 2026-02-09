@@ -88,6 +88,13 @@ export const PLATFORM_PATTERNS: Record<string, Partial<Platform>> = {
     archFull: "ARM64",
     displayName: "Linux ARM64",
   },
+  "linux-arm64": {
+    os: "Linux",
+    osIcon: "",
+    arch: "arm64",
+    archFull: "ARM64",
+    displayName: "Linux ARM64",
+  },
   "darwin-arm64": {
     os: "macOS",
     osIcon: "",

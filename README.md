@@ -164,6 +164,37 @@ jobs:
 - `darwin-amd64` - x86_64-apple-darwin (cross-compiled)
 - `windows-amd64` - x86_64-pc-windows-msvc
 
+### go-build
+
+Reusable workflow for building Go binaries across multiple platforms. All platforms build on `ubuntu-24.04` using Go's native cross-compilation (no CGO), so macOS/Windows runners are unnecessary. Version metadata is auto-injected via `-ldflags` targeting `main.version`, `main.commit`, and `main.date`.
+
+```yaml
+jobs:
+  build:
+    uses: albertocavalcante/actions/.github/workflows/go-build.yml@main
+    with:
+      binary-name: myapp
+      go-version: "1.25"
+      platforms: "linux-amd64,linux-arm64,darwin-arm64,darwin-amd64,windows-amd64"
+      # Optional:
+      # module-path: "./cmd/myapp"      # defaults to ./cmd/{binary-name}
+      # build-tags: "full"              # Go build tags
+      # ldflags: "-X main.extra=value"  # appended after auto-injected version/commit/date
+      # artifact-prefix: "binary"       # prefix for artifact names
+      # artifact-retention-days: 7
+      # timeout-minutes: 15
+
+# Produces artifacts: binary-linux-amd64, binary-linux-arm64, etc.
+# Each contains: myapp-{platform}.tar.gz/.zip and .sha256
+```
+
+**Supported platforms:**
+- `linux-amd64` - Linux x86_64
+- `linux-arm64` - Linux ARM64
+- `darwin-arm64` - macOS Apple Silicon
+- `darwin-amd64` - macOS Intel
+- `windows-amd64` - Windows x86_64
+
 ## Complete Release Workflow Example
 
 Combine the actions for a complete release automation pipeline:
